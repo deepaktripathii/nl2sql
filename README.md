@@ -1,2 +1,2 @@
-# nl2sql
-nl2sql
+# natural language to sql generator
+natural language to sql generator
