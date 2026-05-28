@@ -1,0 +1,104 @@
+"""
+llm_interface.py
+────────────────
+Wrapper around the OpenAI Chat Completions API.
+
+Responsibilities:
+- Initialise the OpenAI client with key from config
+- Send the prompt messages and return the raw SQL string
+- Handle API errors gracefully with typed exceptions
+- Provide a mock / offline mode for testing without an API key
+"""
+
+from __future__ import annotations
+import re
+from typing import Optional
+from app.config import cfg
+from app.utils.logger import get_logger
+from openai import OpenAI
+
+logger = get_logger(__name__)
+
+
+class LLMError(Exception):
+    """Raised when the LLM call fails."""
+
+
+class LLMInterface:
+    """
+    Thin wrapper around the OpenAI ChatCompletion endpoint.
+
+    Usage
+    -----
+    llm = LLMInterface()
+    raw_sql = llm.generate(messages)
+    """
+
+    def __init__(self) -> None:
+        self._model       = cfg.openai.model
+        self._max_tokens  = cfg.openai.max_tokens
+        self._temperature = cfg.openai.temperature
+        self._client      = None
+        self._init_client()
+
+    def _init_client(self) -> None:
+    try:
+        if not cfg.openai.api_key:
+            logger.warning("OPENAI_API_KEY not set — LLM calls will fail.")
+            return
+
+        self._client = OpenAI(api_key=cfg.openai.api_key)
+        logger.info("OpenAI client initialised (model=%s)", self._model)
+
+    except Exception as e:
+        logger.error("OpenAI init error: %s", e)
+
+    # ── public API ─────────────────────────────────────────────────────────
+
+    def generate(self, messages: list[dict]) -> str:
+        """
+        Send messages to OpenAI and return the SQL string.
+
+        Parameters
+        ----------
+        messages : list[dict]  — output of PromptBuilder.build()
+
+        Returns
+        -------
+        str — raw SQL text (may still need sanitisation)
+
+        Raises
+        ------
+        LLMError on API failure
+        """
+      
+
+        try:
+            response = openai.ChatCompletion.create(
+                model=self._model,
+                messages=messages,
+                max_tokens=self._max_tokens,
+                temperature=self._temperature,
+            )
+
+            raw = response['choices'][0]['message']['content']
+            logger.debug("LLM raw response: %s", raw[:200])
+
+            return self._clean_response(raw)
+
+        except Exception as exc:
+            logger.error("OpenAI API error: %s", exc)
+            raise LLMError(f"OpenAI API error: {exc}") from exc
+
+    def is_available(self) -> bool:
+        return self._client is not None and bool(cfg.openai.api_key)
+
+    # ── helpers ────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _clean_response(text: str) -> str:
+        """Strip markdown fences and leading/trailing whitespace."""
+        # Remove ```sql ... ``` or ``` ... ```
+        text = re.sub(r"```(?:sql)?\s*", "", text, flags=re.IGNORECASE)
+        text = text.replace("```", "")
+        return text.strip()
